@@ -3,60 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>合成大多米 </title>
+    <title>合成大多米</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.55.2/phaser.min.js"></script>
     <style>
-        body { 
-            margin: 0; 
-            background: #fdf6e3; 
-            display: flex; 
-            flex-direction: column;
-            align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
-            overflow: hidden; 
-            font-family: sans-serif;
-            touch-action: none; /* 防止手机浏览器下拉刷新 */
-        }
-        #score-ui { 
-            position: absolute; 
-            top: 5%; 
-            font-size: 24px; 
-            font-weight: bold; 
-            color: #657b83; 
-            z-index: 10; 
-        }
-        #ui-layer { 
-            position: absolute; 
-            z-index: 100; 
-            text-align: center; 
-            background: rgba(253, 246, 227, 0.9);
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-        }
-        button { 
-            padding: 15px 40px; 
-            font-size: 20px; 
-            cursor: pointer; 
-            background: #859900; 
-            color: white; 
-            border: none; 
-            border-radius: 10px;
-            box-shadow: 0 4px #586e75; 
-        }
-        #game-container { 
-            width: 100vw; 
-            height: 100vh; 
-            max-width: 450px; /* 限制最大宽度 */
-            max-height: 800px;
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-        }
+        body { margin: 0; background: #fdf6e3; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; font-family: sans-serif; touch-action: none; }
+        #score-ui { position: absolute; top: 5%; font-size: 24px; font-weight: bold; color: #657b83; z-index: 10; pointer-events: none; }
+        #ui-layer { position: absolute; z-index: 100; text-align: center; background: rgba(253, 246, 227, 0.9); width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        button { padding: 15px 40px; font-size: 20px; cursor: pointer; background: #859900; color: white; border: none; border-radius: 10px; box-shadow: 0 4px #586e75; }
+        #game-container { width: 100vw; height: 100vh; max-width: 450px; display: flex; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
@@ -75,7 +29,8 @@ let score = 0;
 let isGameActive = false;
 let currentCat = null;
 let catsGroup;
-let canInput = true; // 防止连续快速点击
+let canInput = false;
+let startTime = 0; // 记录开始时间避免误判结束
 const DEADLINE_Y = 120;
 const GAME_WIDTH = 450;
 const GAME_HEIGHT = 700;
@@ -86,31 +41,20 @@ const config = {
     height: GAME_HEIGHT,
     parent: 'game-container',
     backgroundColor: '#fdf6e3',
-    scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH
-    },
-    physics: { 
-        default: 'arcade', 
-        arcade: { gravity: { y: 1000 }, debug: false } 
-    },
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    physics: { default: 'arcade', arcade: { gravity: { y: 1000 }, debug: false } },
     scene: { preload: preload, create: create, update: update }
 };
 
 const game = new Phaser.Game(config);
 
-function preload() {
-    // 预加载图片
-    for (let i = 1; i <= 9; i++) {
-        this.load.image(`temp_cat${i}`, `${i}.png`);
-    }
-}
+function preload() {} // 暂时不需要加载外部图片
 
 function create() {
     const self = this;
     const colors = [0xff7f7f, 0x7fbf7f, 0x7f7fbf, 0xbfbf7f, 0xbf7fbf, 0x7fbfbf, 0xffb347, 0xb19cd9, 0xff6961];
-    
-    // 动态生成纹理（如果图片没加载出来，也能显示彩色球）
+
+    // 生成纹理
     for (let i = 1; i <= 9; i++) {
         const graphics = this.make.graphics({ x: 0, y: 0, add: false });
         graphics.fillStyle(colors[i-1], 1);
@@ -118,112 +62,13 @@ function create() {
         graphics.generateTexture(`cat${i}`, 100, 100);
     }
 
-    // 绘制警戒线
+    // 警戒线
     const line = this.add.graphics();
     line.lineStyle(2, 0xff4444, 0.5);
     for (let i = 0; i < GAME_WIDTH; i += 10) { line.lineBetween(i, DEADLINE_Y, i + 5, DEADLINE_Y); }
 
     catsGroup = this.physics.add.group();
 
-    // 碰撞逻辑
+    // 碰撞合成逻辑
     this.physics.add.collider(catsGroup, catsGroup, (o1, o2) => {
-        if (o1.level === o2.level && o1.level < 9 && !o1.isMerging && !o2.isMerging) {
-            o1.isMerging = o2.isMerging = true;
-            const nextLvl = o1.level + 1;
-            score += nextLvl * 10;
-            document.getElementById('score-num').innerText = score;
-
-            this.tweens.add({
-                targets: [o1, o2], scale: 0, duration: 100,
-                onComplete: () => {
-                    const midX = (o1.x + o2.x) / 2;
-                    const midY = (o1.y + o2.y) / 2;
-                    o1.destroy(); o2.destroy();
-                    const newCat = spawnCat.call(this, midX, midY, nextLvl);
-                    newCat.setGravityY(1000);
-                }
-            });
-        }
-    });
-
-    // 交互逻辑修改
-    this.input.on('pointermove', (pointer) => {
-        if (isGameActive && currentCat && canInput) {
-            // 球跟着手指左右移动，但保持在顶部
-            let targetX = Phaser.Math.Clamp(pointer.x, currentCat.displayWidth/2, GAME_WIDTH - currentCat.displayWidth/2);
-            currentCat.x = targetX;
-        }
-    });
-
-    this.input.on('pointerup', (pointer) => {
-        if (isGameActive && currentCat && canInput) {
-            dropCat.call(this);
-        }
-    });
-
-    document.getElementById('start-btn').onclick = function() {
-        document.getElementById('ui-layer').style.display = 'none';
-        isGameActive = true;
-        prepareNextCat.call(self);
-    };
-}
-
-function update() {
-    if (!isGameActive) return;
-
-    catsGroup.getChildren().forEach(cat => {
-        // 只有在物体几乎静止且在上方时才判定结束
-        if (cat.body.velocity.y > -1 && cat.body.velocity.y < 1 && cat.y < DEADLINE_Y && cat.body.y > 0) {
-            isGameActive = false;
-            alert("游戏结束！得分: " + score);
-            location.reload();
-        }
-    });
-}
-
-function prepareNextCat() {
-    if (!isGameActive) return;
-    const level = Phaser.Math.Between(1, 3);
-    // 初始位置在正中央
-    currentCat = this.add.sprite(GAME_WIDTH / 2, 60, `cat${level}`);
-    currentCat.level = level;
-    const size = 40 + (level * 25);
-    currentCat.setDisplaySize(size, size);
-    canInput = true;
-}
-
-function dropCat() {
-    canInput = false;
-    const level = currentCat.level;
-    const x = currentCat.x;
-    const y = currentCat.y;
-    
-    currentCat.destroy();
-    
-    const dropped = spawnCat.call(this, x, y, level);
-    dropped.setGravityY(1000);
-    
-    // 延迟生成下一个，防止连发
-    this.time.delayedCall(800, () => {
-        if(isGameActive) prepareNextCat.call(this);
-    });
-}
-
-function spawnCat(x, y, level) {
-    const cat = catsGroup.create(x, y, `cat${level}`);
-    cat.level = level;
-    const size = 40 + (level * 25);
-    cat.setDisplaySize(size, size);
-    
-    // 设置物理属性：圆形碰撞体、弹性
-    cat.setCircle(50); 
-    cat.setBounce(0.2);
-    cat.setCollideWorldBounds(true);
-    
-    this.tweens.add({ targets: cat, scale: { from: 0, to: cat.scale }, duration: 200 });
-    return cat;
-}
-</script>
-</body>
-</html>
-
+        if (o1.level === o2.level && o1.level < 9 && !o1.isMerging && !
