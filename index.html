@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>合成大多米 - 手机版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.55.2/phaser.min.js"></script>
+    <style>
+        body { margin: 0; background: #fdf6e3; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: sans-serif; }
+        #score-ui { position: absolute; top: 10px; left: 10px; font-size: 20px; font-weight: bold; color: #657b83; z-index: 10; display: none; }
+        #ui-layer { position: absolute; z-index: 100; text-align: center; width: 100%; }
+        button { 
+            padding: 15px 40px; font-size: 20px; cursor: pointer; 
+            background: #859900; color: white; border: none; border-radius: 10px;
+            box-shadow: 0 4px #586e75; 
+        }
+        /* 适配移动端点击效果 */
+        button:active { transform: translateY(2px); box-shadow: 0 2px #586e75; }
+        #game-container { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+    </style>
+</head>
+<body>
+
+<div id="score-ui">得分: <span id="score-num">0</span></div>
+
+<div id="ui-layer">
+    <h1 style="color: #657b83; margin-bottom: 20px;">合成大多米</h1>
+    <button id="start-btn">正在准备游戏...</button>
+</div>
+
+<div id="game-container"></div>
+
+<script>
+let score = 0;
+let isGameActive = false;
+let currentCat = null;
+let catsGroup;
+const DEADLINE_Y = 120;
+
+const config = {
+    type: Phaser.AUTO,
+    width: 450,
+    height: 700,
+    parent: 'game-container',
+    backgroundColor: '#fdf6e3',
+    scale: {
+        mode: Phaser.Scale.FIT, // 核心：手机自动适配缩放
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
+    physics: { default: 'arcade', arcade: { gravity: { y: 1000 } } },
+    scene: { preload: preload, create: create, update: update }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {
+    // 加载图片，加入时间戳防止 GitHub 缓存旧图
+    for (let i = 1; i <= 9; i++) {
+        this.load.image(`temp_cat${i}`, `${i}.png`);
+    }
+}
+
+function create() {
+    const self = this;
+    const startBtn = document.getElementById('start-btn');
+    startBtn.innerText = "开始挑战";
+    
+    startBtn.onclick = function() {
+        document.getElementById('ui-layer').style.display = 'none';
+        document.getElementById('score-ui').style.display = 'block';
+        isGameActive = true;
+        prepareNextCat.call(self);
+    };
+
+    // 贴图处理 (彩色球保底)
+    const colors = [0xff7f7f, 0x7fbf7f, 0x7f7fbf, 0xbfbf7f, 0xbf7fbf, 0x7fbfbf, 0xffb347, 0xb19cd9, 0xff6961];
+    for (let i = 1; i <= 9; i++) {
+        const key = `temp_cat${i}`;
+        if (this.textures.exists(key) && this.textures.get(key).source[0].width > 1) {
+            const src = this.textures.get(key).getSourceImage();
+            const size = Math.min(src.width, src.height);
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.beginPath(); ctx.arc(size/2, size/2, size/2, 0, Math.PI*2); ctx.clip();
+            ctx.drawImage(src, (src.width-size)/2, (src.height-size)/2, size, size, 0, 0, size, size);
+            this.textures.addCanvas(`cat${i}`, canvas);
+        } else {
+            const graphics = this.add.graphics();
+            graphics.fillStyle(colors[i-1], 1);
+            graphics.fillCircle(50, 50, 50);
+            graphics.generateTexture(`cat${i}`, 100, 100);
+            graphics.destroy();
+        }
+    }
+
+    // 画警戒线
+    const lineGraphics = this.add.graphics();
+    lineGraphics.lineStyle(2, 0xff4444, 0.5);
+    for (let i = 0; i < 450; i += 10) { lineGraphics.lineBetween(i, DEADLINE_Y, i + 5, DEADLINE_Y); }
+
+    this.physics.world.setBounds(0, 0, 450, 700);
+    catsGroup = this.physics.add.group();
+
+    // 点击/触摸掉落
+    this.input.on('pointerdown', (pointer) => {
+        if (!isGameActive || !currentCat) return;
+        let droppedCat = currentCat;
+        droppedCat.setGravityY(1000);
+        droppedCat.setCollideWorldBounds(true);
+        catsGroup.add(droppedCat);
+        currentCat = null;
+        this.time.delayedCall(600, () => { if(isGameActive) prepareNextCat.call(this); });
+    });
+
+    this.physics.add.collider(catsGroup, catsGroup, (o1, o2) => {
+        if (o1.level === o2.level && o1.level < 9 && !o1.isMerging && !o2.isMerging) {
+            o1.isMerging = o2.isMerging = true;
+            const nextLvl = o1.level + 1;
+            score += nextLvl * 10;
+            document.getElementById('score-num').innerText = score;
+            this.tweens.add({
+                targets: [o1, o2], scale: 0, duration: 100,
+                onComplete: () => {
+                    const midX = (o1.x + o2.x) / 2;
+                    const midY = (o1.y + o2.y) / 2;
+                    o1.destroy(); o2.destroy();
+                    const newCat = spawnCat.call(this, midX, midY, nextLvl);
+                    newCat.setGravityY(1000);
+                }
+            });
+        }
+    });
+}
+
+function update() {
+    if (!isGameActive) return;
+    if (currentCat) {
+        // 平滑移动适配手指滑动
+        currentCat.x = Phaser.Math.Linear(currentCat.x, this.input.activePointer.x, 0.2);
+        currentCat.x = Phaser.Math.Clamp(currentCat.x, currentCat.displayWidth/2, 450 - currentCat.displayWidth/2);
+    }
+    catsGroup.getChildren().forEach(cat => {
+        if (cat.body.velocity.y > -1 && cat.body.velocity.y < 1 && cat.y < DEADLINE_Y) {
+            isGameActive = false;
+            alert("游戏结束！大多米溢出啦！");
+            location.reload();
+        }
+    });
+}
+
+function prepareNextCat() {
+    const level = Phaser.Math.Between(1, 3);
+    currentCat = this.physics.add.sprite(this.input.activePointer.x, 50, `cat${level}`);
+    currentCat.level = level;
+    const size = 40 + (level * 25);
+    currentCat.setDisplaySize(size, size);
+    currentCat.setCircle(50);
+    currentCat.setGravityY(0);
+}
+
+function spawnCat(x, y, level) {
+    const cat = catsGroup.create(x, y, `cat${level}`);
+    cat.level = level;
+    const size = 40 + (level * 25);
+    cat.setDisplaySize(size, size);
+    cat.setCircle(50);
+    cat.setBounce(0.2);
+    cat.setCollideWorldBounds(true);
+    this.tweens.add({ targets: cat, scale: { from: 0, to: cat.scale }, duration: 200 });
+    return cat;
+}
+</script>
+</body>
+</html>
