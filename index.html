@@ -17,7 +17,7 @@
 
 <div id="score-ui">得分: <span id="score-num">0</span></div>
 <div id="ui-layer">
-    <h1 style="color: #657b83;">合成大多米</h1>
+    <h1 style="color: #657b83;">合成大猫猫</h1>
     <p style="color: #93a1a1; font-size: 14px;">点屏幕左右移动，松开手指落下</p>
     <button id="start-btn">开始挑战</button>
 </div>
@@ -29,9 +29,25 @@ let isGameActive = false;
 let currentCat = null;
 let catsGroup;
 let canInput = false;
-const DEADLINE_Y = 120; // 失败警戒线
+
+const DEADLINE_Y = 120; 
 const GAME_WIDTH = 450;
 const GAME_HEIGHT = 750;
+const BASE_SIZE = 200; // 内部处理图片时的标准基准大小
+
+// 魔法参数：这里控制1级到9级猫猫的具体大小！
+// 如果你觉得某一级太大了或太小了，可以修改这里的数字
+const LEVEL_SCALES =[
+    0.25, // 1级缩放比例 (直径约50px)
+    0.35, // 2级缩放比例 (直径约70px)
+    0.50, // 3级缩放比例 (直径约100px)
+    0.70, // 4级缩放比例 (直径约140px)
+    0.90, // 5级缩放比例 (直径约180px)
+    1.15, // 6级缩放比例 (直径约230px)
+    1.45, // 7级缩放比例 (直径约290px)
+    1.75, // 8级缩放比例 (直径约350px)
+    2.10  // 9级缩放比例 (直径约420px - 接近满屏宽度)
+];
 
 const config = {
     type: Phaser.AUTO,
@@ -47,12 +63,10 @@ const config = {
 const game = new Phaser.Game(config);
 
 function preload() {
-    // 强制允许跨域加载（防止一些网络问题）
     this.load.crossOrigin = 'anonymous';
-    
-    // 加载 1.png 到 9.png
+    // 先把原始图片加载进来，命名为 raw_cat1 到 raw_cat9
     for (let i = 1; i <= 9; i++) {
-        this.load.image(`img_cat${i}`, `${i}.png`);
+        this.load.image(`raw_cat${i}`, `${i}.png`);
     }
 }
 
@@ -60,15 +74,47 @@ function create() {
     const self = this;
     const colors =[0xff7f7f, 0x7fbf7f, 0x7f7fbf, 0xbfbf7f, 0xbf7fbf, 0x7fbfbf, 0xffb347, 0xb19cd9, 0xff6961];
 
-    // 生成彩色圆球纹理（以防你的图片还是没弄对名字）
+    // 【核心魔法】：遍历所有图片，自动裁剪成圆形并统一保存为 cat1 到 cat9
     for (let i = 1; i <= 9; i++) {
-        const graphics = this.make.graphics({ x: 0, y: 0, add: false });
-        graphics.fillStyle(colors[i-1], 1);
-        graphics.fillCircle(50, 50, 50);
-        graphics.generateTexture(`fallback${i}`, 100, 100);
+        const rawKey = `raw_cat${i}`;
+        const finalKey = `cat${i}`;
+
+        if (this.textures.exists(rawKey) && this.textures.get(rawKey).key !== '__MISSING') {
+            // 获取原图
+            let srcImg = this.textures.get(rawKey).getSourceImage();
+            
+            // 创建一个隐藏的画板
+            let canvas = document.createElement('canvas');
+            canvas.width = BASE_SIZE;
+            canvas.height = BASE_SIZE;
+            let ctx = canvas.getContext('2d');
+            
+            // 1. 画一个圆，并限制接下来的图片只能画在这个圆里面 (裁剪效果)
+            ctx.beginPath();
+            ctx.arc(BASE_SIZE / 2, BASE_SIZE / 2, BASE_SIZE / 2, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+            
+            // 2. 计算如何截取原图的最中间部分
+            let minSide = Math.min(srcImg.width, srcImg.height); // 取长和宽里较短的一个作为正方形边长
+            let startX = (srcImg.width - minSide) / 2;
+            let startY = (srcImg.height - minSide) / 2;
+            
+            // 3. 把原图的中间部分画到我们的圆里，并强行缩放到 200x200 标准大小
+            ctx.drawImage(srcImg, startX, startY, minSide, minSide, 0, 0, BASE_SIZE, BASE_SIZE);
+            
+            // 4. 把加工好的圆形图片存进游戏，名字叫 cat1, cat2...
+            this.textures.addCanvas(finalKey, canvas);
+        } else {
+            // 如果图片加载失败（比如没传图），就画一个彩色的纯色圆球垫底
+            const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+            graphics.fillStyle(colors[i-1], 1);
+            graphics.fillCircle(BASE_SIZE / 2, BASE_SIZE / 2, BASE_SIZE / 2);
+            graphics.generateTexture(finalKey, BASE_SIZE, BASE_SIZE);
+        }
     }
 
-    // 绘制警戒线 (红色虚线)
+    // 绘制失败警戒线 (红色虚线)
     const line = this.add.graphics();
     line.lineStyle(2, 0xff4444, 0.5);
     for (let i = 0; i < GAME_WIDTH; i += 15) { line.lineBetween(i, DEADLINE_Y, i + 8, DEADLINE_Y); }
@@ -95,33 +141,30 @@ function create() {
         }
     });
 
-    // 修复：触摸移动
+    // 触摸移动
     this.input.on('pointermove', (pointer) => {
         if (isGameActive && currentCat && canInput) {
             currentCat.x = Phaser.Math.Clamp(pointer.x, currentCat.displayWidth/2, GAME_WIDTH - currentCat.displayWidth/2);
         }
     });
 
-    // 修复：松开手指掉落
+    // 松开手指掉落
     this.input.on('pointerup', () => {
         if (isGameActive && currentCat && canInput) {
             dropCat.call(self);
         }
     });
 
-    // 修复：开始按钮逻辑
+    // 开始按钮逻辑
     const startBtn = document.getElementById('start-btn');
     startBtn.onclick = function(event) {
-        event.stopPropagation(); // 【关键修复】阻止点击穿透到背后的游戏画布
+        event.stopPropagation();
         document.getElementById('ui-layer').style.display = 'none';
         isGameActive = true;
         score = 0;
         document.getElementById('score-num').innerText = "0";
         
-        // 稍微延迟一下出现第一只猫，防止误触
-        self.time.delayedCall(200, () => {
-            prepareNextCat.call(self);
-        });
+        self.time.delayedCall(200, () => { prepareNextCat.call(self); });
     };
 }
 
@@ -130,18 +173,13 @@ function update() {
 
     catsGroup.getChildren().forEach(cat => {
         const aliveTime = Date.now() - cat.spawnTime;
-        
-        // 【关键修复】判定死亡的条件变得更加严谨：
-        // 1. 存活超过3秒
-        // 2. 几乎完全静止（防止合成时被弹飞到高空导致的误判）
-        // 3. 猫猫的顶部越过了红线
         const isResting = Math.abs(cat.body.velocity.y) < 2 && Math.abs(cat.body.velocity.x) < 2;
-        const catTopY = cat.y - (cat.displayHeight / 2); // 猫的最高点
+        const catTopY = cat.y - (cat.displayHeight / 2);
 
         if (aliveTime > 3000 && isResting && catTopY < DEADLINE_Y) {
             isGameActive = false;
             alert("游戏结束！猫猫溢出啦！最终得分: " + score);
-            location.reload(); // 刷新页面重新开始
+            location.reload(); 
         }
     });
 }
@@ -149,17 +187,11 @@ function update() {
 function prepareNextCat() {
     if (!isGameActive) return;
     const level = Phaser.Math.Between(1, 3); // 随机生成1-3级的猫猫
+    const scale = LEVEL_SCALES[level - 1]; // 获取对应等级的缩放比例
     
-    // 检查图片是否存在，否则用备用彩球
-    let textureKey = `fallback${level}`;
-    if (this.textures.exists(`img_cat${level}`) && this.textures.get(`img_cat${level}`).key !== '__MISSING') {
-        textureKey = `img_cat${level}`;
-    }
-    
-    currentCat = this.add.sprite(GAME_WIDTH / 2, 50, textureKey);
+    currentCat = this.add.sprite(GAME_WIDTH / 2, 50, `cat${level}`);
     currentCat.level = level;
-    const size = (40 + (level * 25)) / 100;
-    currentCat.setScale(size);
+    currentCat.setScale(scale);
     canInput = true;
 }
 
@@ -170,27 +202,25 @@ function dropCat() {
     
     spawnCat.call(this, x, y, level);
     
-    // 掉落后等待1秒再生成下一个，留出合成时间
     this.time.delayedCall(1000, () => {
         if (isGameActive) prepareNextCat.call(this);
     });
 }
 
 function spawnCat(x, y, level) {
-    let textureKey = `fallback${level}`;
-    if (this.textures.exists(`img_cat${level}`) && this.textures.get(`img_cat${level}`).key !== '__MISSING') {
-        textureKey = `img_cat${level}`;
-    }
-
-    const cat = catsGroup.create(x, y, textureKey);
+    const scale = LEVEL_SCALES[level - 1];
+    
+    const cat = catsGroup.create(x, y, `cat${level}`);
     cat.level = level;
     cat.spawnTime = Date.now();
     
-    const finalSize = (40 + (level * 25)) / 100;
-    cat.setScale(finalSize);
-    cat.setCircle(45); // 稍微调小一点物理碰撞判定范围，防止过度拥挤
-    cat.setBounce(0.1); // 降低弹性，防止合成时满天飞
+    // 物理引擎设定
+    cat.setScale(scale);
+    // 核心物理：设定碰撞范围是完美的圆形（基于200像素基准，半径是100）
+    cat.setCircle(100); 
+    cat.setBounce(0.15); // 微小的弹性，显得有果冻感
     cat.setCollideWorldBounds(true);
+    
     return cat;
 }
 </script>
