@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>合成大猫猫</title>
+    <title>合成大多米</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.55.2/phaser.min.js"></script>
     <style>
         body { margin: 0; background: #fdf6e3; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; touch-action: none; }
@@ -35,8 +35,7 @@ const GAME_WIDTH = 450;
 const GAME_HEIGHT = 750;
 const BASE_SIZE = 200; // 内部处理图片时的标准基准大小
 
-// 魔法参数：这里控制1级到9级猫猫的具体大小！
-// 如果你觉得某一级太大了或太小了，可以修改这里的数字
+// 这里控制1级到9级猫猫的具体大小！
 const LEVEL_SCALES =[
     0.25, // 1级缩放比例 (直径约50px)
     0.35, // 2级缩放比例 (直径约70px)
@@ -74,7 +73,6 @@ function create() {
     const self = this;
     const colors =[0xff7f7f, 0x7fbf7f, 0x7f7fbf, 0xbfbf7f, 0xbf7fbf, 0x7fbfbf, 0xffb347, 0xb19cd9, 0xff6961];
 
-    // 【核心魔法】：遍历所有图片，自动裁剪成圆形并统一保存为 cat1 到 cat9
     for (let i = 1; i <= 9; i++) {
         const rawKey = `raw_cat${i}`;
         const finalKey = `cat${i}`;
@@ -226,3 +224,4 @@ function spawnCat(x, y, level) {
 </script>
 </body>
 </html>
+
